@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# 명령줄 도구가 만드는 결과·캐시
+cli/cache/
+cli/output/
+cache/
+output/
+output_test/
+
+# 테스트·편집기·OS
+test-results/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

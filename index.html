@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>논문 시조 추적기</title>
+<meta name="description" content="논문 제목이나 DOI를 넣으면 참고문헌을 거슬러 올라가 인용 계보의 시조 후보를 찾아 주는 브라우저 도구 (OpenAlex 기반, 설치 불필요)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23b3261e'/%3E%3Cg stroke='%23fff' stroke-width='2' fill='%23fff'%3E%3Cpath d='M16 7v9M16 16l-7 8M16 16l7 8' fill='none'/%3E%3Ccircle cx='16' cy='7' r='3'/%3E%3Ccircle cx='9' cy='24' r='3'/%3E%3Ccircle cx='23' cy='24' r='3'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#6b6b66;--card:#fff;--line:#e3e1da;--acc:#b3261e;--accfg:#fff;--ok:#2e7d32;--warn:#8a5a00}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161614;--fg:#ecebe5;--mut:#9a9890;--card:#1f1f1c;--line:#34332e;--acc:#ff8a80;--accfg:#1d1d1b;--ok:#81c784;--warn:#ffcc80}}
+:root[data-theme="dark"]{--bg:#161614;--fg:#ecebe5;--mut:#9a9890;--card:#1f1f1c;--line:#34332e;--acc:#ff8a80;--accfg:#1d1d1b;--ok:#81c784;--warn:#ffcc80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Noto Sans KR","Malgun Gothic",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:24px 16px 70px}
+h1{font-size:23px;margin:0 0 2px}h2{font-size:17px;margin:34px 0 8px}
+.sub{color:var(--mut);font-size:12.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px;overflow-x:auto}
+form .row{display:flex;gap:8px;flex-wrap:wrap}
+input[type=text]{flex:1 1 360px;min-width:0;padding:11px 12px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px}
+input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px}
+input[type=number]{width:84px;padding:6px 8px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:10px 16px}
+button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+button.chip{padding:3px 10px;font-size:12.5px;border-radius:99px}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut);font-size:13.5px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px 18px;margin-top:10px;font-size:13.5px}
+.opts label{display:flex;flex-direction:column;gap:3px}.opts .h{color:var(--mut);font-size:12px}
+.opts .chk{flex-direction:row;align-items:center;gap:6px}
+.lh{display:flex;align-items:baseline;gap:4px;color:var(--fg)}
+.lh output{font-weight:700;font-size:17px;color:var(--acc);min-width:2.2ch;text-align:right;font-variant-numeric:tabular-nums}
+.lh em{font-style:normal;color:var(--mut);font-size:12.5px}
+input[type=range]{width:100%;margin:6px 0 0;accent-color:var(--acc);cursor:pointer;height:24px}
+.ends{display:flex;justify-content:space-between;color:var(--mut);font-size:11.5px}.ends i{font-style:normal}
+#status{margin-top:12px;font-size:13.5px}
+.stline{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.spin{flex:none;width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:rot .8s linear infinite}
+.spin.off{display:none}@keyframes rot{to{transform:rotate(360deg)}}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:8px}
+.bar>i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s;border-radius:6px}
+.bar.run>i{background-image:linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 75%,transparent 75%);background-size:20px 20px;animation:stripe .8s linear infinite;min-width:4%}
+@keyframes stripe{to{background-position:20px 0}}
+#stats{margin-top:6px;color:var(--mut);font-size:12.5px;font-variant-numeric:tabular-nums}
+@media(prefers-reduced-motion:reduce){.spin,.bar.run>i{animation:none}}
+#log{margin:8px 0 0;padding:0;list-style:none;color:var(--mut);font-size:12.5px;max-height:130px;overflow:auto}
+.err{color:var(--acc);font-weight:600}.note{color:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;white-space:nowrap}a{color:inherit}
+.grid{stroke:var(--line);stroke-width:1}.ax{fill:var(--mut);font-size:11px}
+.lane0{fill:transparent}.lane1{fill:rgba(128,128,120,.07)}
+.edge{stroke:var(--mut);stroke-opacity:.14;stroke-width:1}.edge.main{stroke:var(--acc);stroke-opacity:.85;stroke-width:2.2}
+.node{fill-opacity:.82;stroke:var(--card);stroke-width:1}.node.founder{stroke:var(--acc);stroke-width:2.5}.node.seed{stroke:var(--fg);stroke-width:3}
+.mapwrap{min-width:880px}.legend{font-size:12.5px;color:var(--mut);margin-top:6px}
+.lin li{margin:4px 0}.dec{margin:8px 0}.dh{display:flex;gap:10px;align-items:center}
+.dbar{display:inline-block;height:8px;background:var(--acc);opacity:.55;border-radius:4px}
+.dec ul{margin:2px 0 0;padding-left:18px;color:var(--mut);font-size:12.5px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.alt{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.printonly{display:none}.pdfhint{flex-basis:100%;margin:0}
+.maptools{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;margin-bottom:8px;font-size:13.5px}
+.maptools label{display:flex;align-items:center;gap:8px}.maptools output{font-weight:700;color:var(--acc);min-width:1.6ch;text-align:right}
+.maptools input{width:220px;margin:0}
+@page{size:A4;margin:13mm 12mm}
+@media print{
+  :root,:root[data-theme]{--bg:#fff !important;--fg:#1d1d1b !important;--mut:#555 !important;--card:#fff !important;--line:#cfcdc6 !important;--acc:#b3261e !important;--accfg:#fff !important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{background:#fff;font-size:12.5px}main{max-width:none;padding:0}
+  #f,.actions,#theme,.alt,button,#status,.scr{display:none !important}
+  .top{display:block}.printonly{display:block}
+  .card{border-color:var(--line);overflow:visible;padding:10px 12px}
+  h2{break-after:avoid;margin:18px 0 6px;font-size:15px}
+  tr,.dec,li{break-inside:avoid}
+  .mapwrap{min-width:0}.card:has(svg){break-inside:avoid}
+  a{text-decoration:none}
+  table{font-size:11.5px}th,td{padding:5px 6px}
+}
+</style>
+</head>
+<body>
+<main>
+<div class="top">
+  <div>
+    <h1>논문 시조 추적기</h1>
+    <div class="sub">논문 제목이나 DOI를 넣으면 참고문헌을 거슬러 올라가 계보의 시조 후보를 찾아 줍니다 · 데이터: OpenAlex, Semantic Scholar</div>
+  </div>
+  <button type="button" id="theme" class="chip" aria-label="화면 모드 전환">화면 모드</button>
+</div>
+
+<form id="f" class="card" autocomplete="off">
+  <div class="row">
+    <input type="text" id="q" placeholder="논문 제목(영문) 또는 DOI 또는 OpenAlex ID (예: 10.1017/S0003055403000534)" aria-label="논문 제목 또는 DOI" required>
+    <button type="submit" class="primary" id="go">시조 추적</button>
+    <button type="button" id="stop" disabled>중단</button>
+  </div>
+  <div class="alt"><span class="sub">입력 예:</span>
+    <button type="button" class="chip" data-ex="10.1017/S0003055403000534">DOI 예시</button>
+    <button type="button" class="chip" data-ex="Ethnicity, Insurgency, and Civil War">제목 예시</button>
+  </div>
+  <details open>
+    <summary>추적 범위 설정 (슬라이더를 좌우로 드래그)</summary>
+    <div class="opts">
+      <label><span class="lh">거슬러 올라갈 단계 수 <output id="depthV" for="depth">6</output><em>단계</em></span><input type="range" id="depth" min="1" max="6" step="1" value="6"><span class="ends"><i>1 (가까운 조상만)</i><i>6 (아주 먼 조상)</i></span></label>
+      <label><span class="lh">논문당 확장할 참고문헌 수 <output id="topRefsV" for="topRefs">50</output><em>편</em></span><input type="range" id="topRefs" min="3" max="50" step="1" value="50"><span class="ends"><i>3 (핵심만, 빠름)</i><i>50 (아주 넓게, 느림)</i></span></label>
+      <label><span class="lh">수집 논문 상한 <output id="maxPapersV" for="maxPapers">500</output><em>편</em></span><input type="range" id="maxPapers" min="50" max="1000" step="50" value="500"><span class="ends"><i>50 (빠름)</i><i>1000 (오래 걸림)</i></span></label>
+      <div class="h" style="grid-column:1/-1">단계·확장 수·상한을 키울수록 계보가 촘촘해지지만 시간이 오래 걸립니다. 처음에는 기본값으로 해 보세요.</div>
+      <label>분야 제한(선택)<input type="text" id="field" placeholder="예: Political Science" style="flex:none;width:100%"><span class="h">입력하면 이 분야 논문만 위로 확장합니다</span></label>
+      <label class="chk"><input type="checkbox" id="useS2" checked>참고문헌이 비어 있으면 Semantic Scholar로 보완</label>
+    </div>
+  </details>
+  <div id="status" aria-live="polite" hidden>
+    <div class="stline"><span class="spin off" id="spin" aria-hidden="true"></span><div id="msg"></div></div>
+    <div class="bar" id="bar"><i id="pb"></i></div>
+    <div id="stats"></div>
+    <ul id="log"></ul>
+  </div>
+</form>
+
+<div id="out"></div>
+</main>
+
+<script>
+"use strict";
+const API = "https://api.openalex.org";
+const S2 = "https://api.semanticscholar.org/graph/v1";
+const SELECT = "id,doi,title,publication_year,cited_by_count,referenced_works,primary_topic,topics,keywords,authorships,primary_location";
+const WEIGHTS = {paths:.30, indeg:.25, cites:.15, early:.20, topic:.10};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const shortId = x => x ? x.split("/").pop() : x;
+const normDoi = d => d ? d.trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").toLowerCase() : null;
+
+/* ───────── 네트워크 ───────── */
+const cache = new Map();
+async function getJSON(url, signal, tries = 4) {
+  if (cache.has(url)) return cache.get(url);
+  for (let i = 0; i < tries; i++) {
+    let r;
+    stats.req++; tick();
+    try { r = await fetch(url, {signal}); }
+    catch (e) {
+      if (e.name === "AbortError") throw e;
+      if (i === tries - 1) throw new Error("네트워크 요청에 실패했습니다. 인터넷 연결을 확인해 주세요. (" + e.message + ")");
+      await sleep(800 * 2 ** i); continue;
+    }
+    if (r.status === 404) return null;
+    if (r.status === 429 || r.status >= 500) { log(`서버가 바빠 ${2 ** i}초 뒤 다시 시도합니다 (HTTP ${r.status})`); await sleep(1000 * 2 ** i); continue; }
+    if (!r.ok) throw new Error("서버 응답 오류 (HTTP " + r.status + ")");
+    const j = await r.json(); cache.set(url, j); return j;
+  }
+  throw new Error("요청이 반복해서 실패했습니다. 잠시 후 다시 시도해 주세요. (속도 제한일 수 있습니다)");
+}
+const qs = o => Object.entries(o).map(([k, v]) => k + "=" + encodeURIComponent(v).replace(/%7C/g, "|").replace(/%3A/g, ":").replace(/%2F/g, "/")).join("&");
+
+function toRecord(w) {
+  const topics = (w.topics || []).map(t => t.display_name).filter(Boolean);
+  const pt = w.primary_topic || {};
+  const src = ((w.primary_location || {}).source) || {};
+  return {
+    id: shortId(w.id), doi: normDoi(w.doi), title: w.title || "(제목 없음)",
+    year: w.publication_year || null, cites: w.cited_by_count || 0,
+    refs: (w.referenced_works || []).map(shortId),
+    topic: pt.display_name || topics[0] || "미분류",
+    field: (pt.field || {}).display_name || "", subfield: (pt.subfield || {}).display_name || "",
+    topics, authors: (w.authorships || []).slice(0, 3).map(a => a.author && a.author.display_name).filter(Boolean),
+    venue: src.display_name || "",
+    kw: (w.keywords || []).map(k => ({t: k.display_name, s: k.score})).filter(k => k.t)
+  };
+}
+
+async function resolve(query, signal) {
+  const q = query.trim();
+  const wid = q.match(/(?:^|openalex\.org\/)(W\d+)$/i);
+  if (wid) { const w = await getJSON(`${API}/works/${wid[1].toUpperCase()}?select=${SELECT}`, signal); return {seed: w && toRecord(w), alts: []}; }
+  const d = normDoi(q);
+  if (d && d.startsWith("10.")) { const w = await getJSON(`${API}/works/doi:${encodeURI(d)}?select=${SELECT}`, signal); return {seed: w && toRecord(w), alts: []}; }
+  const res = await getJSON(`${API}/works?${qs({search: q, "per-page": 5, select: SELECT})}`, signal);
+  const hits = ((res || {}).results || []).map(toRecord);
+  return {seed: hits[0] || null, alts: hits.slice(1)};
+}
+
+async function fetchWorks(ids, signal, onChunk) {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const out = [];
+  for (let i = 0; i < chunks.length; i += 3) {
+    const rs = await Promise.all(chunks.slice(i, i + 3).map(c =>
+      getJSON(`${API}/works?${qs({filter: "openalex:" + c.join("|"), "per-page": 100, select: SELECT})}`, signal)));
+    rs.forEach(r => ((r || {}).results || []).forEach(w => out.push(toRecord(w))));
+    if (onChunk) onChunk(Math.min(chunks.length, i + 3), chunks.length);
+  }
+  return out;
+}
+
+async function s2References(doi, signal) {
+  if (!doi) return [];
+  try {
+    const data = await getJSON(`${S2}/paper/DOI:${encodeURI(doi)}/references?fields=externalIds&limit=1000`, signal, 2);
+    const dois = ((data || {}).data || []).map(i => (((i.citedPaper || {}).externalIds) || {}).DOI).filter(Boolean).map(x => x.toLowerCase());
+    const ids = [];
+    for (let i = 0; i < dois.length; i += 50) {
+      const c = dois.slice(i, i + 50);
+      const r = await getJSON(`${API}/works?${qs({filter: "doi:" + c.map(x => "https://doi.org/" + x).join("|"), "per-page": 100, select: "id"})}`, signal);
+      ((r || {}).results || []).forEach(w => ids.push(shortId(w.id)));
+    }
+    return ids;
+  } catch (e) { if (e.name === "AbortError") throw e; return []; }
+}
+
+/* ───────── 계보 구축 ───────── */
+async function buildAncestry(seed, o, signal, progress) {
+  const papers = new Map([[seed.id, seed]]), edges = new Set(), expanded = new Set();
+  let frontier = [seed.id];
+  for (let d = 1; d <= o.depth; d++) {
+    if (!frontier.length || papers.size >= o.maxPapers) break;
+    const base = (d - 1) / o.depth, span = 1 / o.depth;
+    const prog = (sub, text) => progress(text, 0.9 * (base + span * sub));
+    log(`깊이 ${d}/${o.depth} 시작: ${frontier.length}편의 참고문헌을 읽습니다`);
+    prog(0, `깊이 ${d}/${o.depth}: 참고문헌 목록을 읽는 중… (${frontier.length}편)`);
+    const refMap = new Map();
+    for (const pid of frontier) {
+      const p = papers.get(pid);
+      if (!p.refs.length && o.useS2) p.refs = await s2References(p.doi, signal);
+      refMap.set(pid, p.refs); expanded.add(pid);
+    }
+    const need = [...new Set([...refMap.values()].flat())].filter(r => !papers.has(r));
+    prog(0.2, `깊이 ${d}/${o.depth}: 참고문헌 ${need.length}편의 정보를 불러오는 중…`);
+    for (const rec of await fetchWorks(need, signal, (k, m) => prog(0.2 + 0.7 * k / m, `깊이 ${d}/${o.depth}: 논문 정보 불러오는 중… (${k}/${m} 묶음)`)))
+      if (!papers.has(rec.id)) papers.set(rec.id, rec);
+    stats.papers = papers.size; tick();
+    const nxt = [];
+    for (const [pid, refs] of refMap) {
+      const known = refs.filter(r => papers.has(r));
+      known.forEach(r => edges.add(pid + ">" + r));
+      let cand = known.filter(r => !expanded.has(r));
+      if (o.field) { const f = o.field.toLowerCase(); cand = cand.filter(r => (papers.get(r).field + " " + papers.get(r).subfield + " " + papers.get(r).topic).toLowerCase().includes(f)); }
+      cand.sort((a, b) => papers.get(b).cites - papers.get(a).cites);
+      nxt.push(...cand.slice(0, o.topRefs));
+    }
+    frontier = [...new Set(nxt)].filter(r => papers.size < o.maxPapers || papers.has(r));
+    log(`깊이 ${d}: 논문 ${papers.size}편, 간선 ${edges.size}개, 다음 확장 ${frontier.length}편`);
+  }
+  for (const [pid, p] of papers) p.refs.forEach(r => { if (papers.has(r)) edges.add(pid + ">" + r); });
+  return {papers, edges: [...edges].map(e => e.split(">"))};
+}
+
+/* ───────── 의미 키워드 추출 · 주제 묶기 ─────────
+   1) 논문마다 제목·OpenAlex 키워드·주제명에서 '의미 있는 단어/구'를 뽑는다 (불용어·범용어 제거, 어근 통합).
+   2) 단어에 TF-IDF 가중치를 주어 논문을 벡터로 만든다 (모든 논문에 흔한 단어는 약해지고, 특징적인 단어가 강해짐).
+   3) 비슷한 단어를 쓰는 논문끼리 묶고(구면 k-means), 묶음 이름을 그 묶음의 대표 단어로 붙인다. */
+const STOP = new Set(("a an the of and or nor but in on at to for from by with without within into onto over under between among through via per as is are was were be been being am this that these those it its they them their there here which who whom whose what when where why how not no than then so such very just also can could may might must shall should will would do does did done have has had having i we you he she our us your his her one two three four five new toward towards upon about after before during across against around out up off more most less least some any all each both either neither other another same own only many much few").split(" "));
+const GENERIC = new Set(("analysis analyses study studies approach approaches evidence role roles effect effects impact impacts review reviews introduction note notes comment comments reply response responses research paper papers article articles case cases perspective perspectives issue issues problem problems question questions answer answers based using use used understanding data beyond revisited reconsidered reconsidering rethinking test tests testing result results finding findings lessons").split(" "));
+const tok = s => (String(s || "").toLowerCase().match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || []);
+const stem = w => {                               // 가벼운 어근 통합: wars→war, economics→economic, parties→party
+  if (/^\d+$/.test(w)) return w;
+  if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3) + "y";
+  if (w.length > 4 && /(ches|shes|sses|xes|zes)$/.test(w)) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w)) return w.slice(0, -1);
+  return w;
+};
+const good = t => t.length >= 3 && !STOP.has(t) && !GENERIC.has(t) && !/^\d+$/.test(t);
+
+function extractTerms(p) {                        // → Map(어근키 → {w: 가중치, s: 표시형, txt: 제목/키워드에서 직접 나왔는지})
+  const out = new Map();
+  const put = (toks, w, txt) => {
+    if (!toks.length) return;
+    const key = toks.map(stem).join(" "), cur = out.get(key);
+    if (!cur) out.set(key, {w, s: toks.join(" "), txt});
+    else { if (w > cur.w) { cur.w = w; cur.s = toks.join(" "); } cur.txt = cur.txt || txt; }
+  };
+  for (const k of p.kw || []) {                   // OpenAlex가 뽑은 키워드(구 단위)
+    let t = tok(k.t); while (t.length && STOP.has(t[0])) t.shift(); while (t.length && STOP.has(t[t.length - 1])) t.pop();
+    if (t.length === 1 && !good(t[0])) continue;
+    put(t, 0.6 + 0.4 * (k.s ?? 0.5), true);
+  }
+  if (p.title && p.title !== "(제목 없음)") {     // 제목의 단어와 인접 두 단어 구
+    const tt = tok(p.title);
+    tt.forEach(t => good(t) && put([t], 0.5, true));
+    for (let i = 0; i + 1 < tt.length; i++) {
+      const a = tt[i], b = tt[i + 1];
+      if (!STOP.has(a) && !STOP.has(b) && a.length >= 3 && b.length >= 3 && (good(a) || good(b))) put([a, b], 0.8, true);
+    }
+  }
+  for (const name of [p.topic, ...(p.topics || [])])   // OpenAlex 주제명 속 단어 (보조 신호: 기원 판정에는 쓰지 않음)
+    tok(name).forEach(t => good(t) && put([t], 0.4, false));
+  return out;
+}
+
+const dot = (a, b) => { if (a.size > b.size) [a, b] = [b, a]; let s = 0; for (const [k, x] of a) { const y = b.get(k); if (y) s += x * y; } return s; };
+
+function buildSemantic(papers) {
+  const docs = new Map(), df = new Map(), surf = new Map();
+  for (const [id, p] of papers) {
+    const t = extractTerms(p); docs.set(id, t);
+    for (const [k, v] of t) {
+      df.set(k, (df.get(k) || 0) + 1);
+      const m = surf.get(k) || surf.set(k, new Map()).get(k); m.set(v.s, (m.get(v.s) || 0) + 1);
+    }
+  }
+  const N = papers.size, maxDf = Math.max(3, Math.floor(N * 0.5));    // 절반 넘는 논문에 나오는 단어는 변별력이 없어 제외
+  const name = k => { const m = surf.get(k); return m ? [...m].sort((a, b) => b[1] - a[1])[0][0] : k; };
+  const vecs = new Map();
+  for (const [id, t] of docs) {
+    const v = new Map(); let n2 = 0;
+    for (const [k, {w}] of t) {
+      const d = df.get(k); if (d < 2 || d > maxDf) continue;
+      const x = w * Math.log(1 + N / d); v.set(k, x); n2 += x * x;
+    }
+    const nr = Math.sqrt(n2) || 1; for (const [k, x] of v) v.set(k, x / nr);
+    vecs.set(id, v);
+  }
+  return {docs, vecs, df, name, N};
+}
+const paperKeywords = (sem, id, n = 4) => [...(sem.vecs.get(id) || [])].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => sem.name(k));
+
+function pickTerms(center, n = 6) {               // 묶음 중심에서 대표 단어 고르기 (포함 관계 중복 제거, 구를 우선)
+  const ranked = [...center].map(([k, x]) => [k, x * (1 + 0.25 * (k.split(" ").length - 1))]).sort((a, b) => b[1] - a[1]);
+  const chosen = [];
+  for (const [k] of ranked) {
+    const kt = new Set(k.split(" "));
+    if (chosen.some(c => { const ct = new Set(c.split(" ")); return [...kt].every(t => ct.has(t)) || [...ct].every(t => kt.has(t)); })) continue;
+    chosen.push(k); if (chosen.length >= n) break;
+  }
+  return chosen;
+}
+
+function clusterPapers(ids, vecs, K, cites) {     // 구면 k-means (코사인 유사도), 결정적 초기화
+  const items = ids.filter(i => vecs.get(i).size), other = ids.filter(i => !vecs.get(i).size);
+  if (!items.length) return {groups: [], centers: [], other};
+  K = Math.max(1, Math.min(K, Math.floor(items.length / 2)));
+  const first = items.reduce((b, i) => (cites(i) > cites(b) ? i : b), items[0]);
+  const centers = [vecs.get(first)], maxSim = new Map(items.map(i => [i, dot(vecs.get(i), centers[0])]));
+  while (centers.length < K) {                    // 기존 중심과 먼 논문 중 인용이 많은 논문을 다음 중심으로
+    let pick = null, best = -1;
+    for (const i of items) { const sc = (1 - maxSim.get(i)) * Math.log(2 + cites(i)); if (sc > best) { best = sc; pick = i; } }
+    centers.push(vecs.get(pick));
+    for (const i of items) maxSim.set(i, Math.max(maxSim.get(i), dot(vecs.get(i), vecs.get(pick))));
+  }
+  const assign = new Map();
+  const nearest = (i, cs) => { let bk = 0, bs = -1; cs.forEach((c, k) => { if (!c) return; const s = dot(vecs.get(i), c); if (s > bs) { bs = s; bk = k; } }); return [bk, bs]; };
+  for (let it = 0; it < 15; it++) {
+    let changed = false;
+    for (const i of items) { const [k] = nearest(i, centers); if (assign.get(i) !== k) { assign.set(i, k); changed = true; } }
+    if (!changed) break;
+    const sums = centers.map(() => new Map());
+    for (const i of items) { const m = sums[assign.get(i)]; for (const [t, x] of vecs.get(i)) m.set(t, (m.get(t) || 0) + x); }
+    sums.forEach((m, k) => { let n2 = 0; for (const x of m.values()) n2 += x * x; const nr = Math.sqrt(n2); if (nr) { for (const [t, x] of m) m.set(t, x / nr); centers[k] = m; } });
+  }
+  let groups = centers.map(() => []); items.forEach(i => groups[assign.get(i)].push(i));
+  const alive = centers.map((c, k) => (groups[k].length >= 2 ? c : null));        // 1편짜리 묶음은 해체해 가장 가까운 묶음으로
+  if (alive.some(Boolean)) {
+    groups = centers.map(() => []);
+    for (const i of items) { const [k, s] = nearest(i, alive); if (s > 0.02) groups[k].push(i); else other.push(i); }
+  }
+  return {groups, centers, other};
+}
+
+function groupSemantic(papers, sem, ids, K, seedId) {
+  const {groups, centers, other} = clusterPapers(ids, sem.vecs, K, id => papers.get(id).cites);
+  const sv = sem.vecs.get(seedId) || new Map();
+  const lanes = groups.map((m, k) => ({m, c: centers[k]})).filter(l => l.m.length).map(l => {
+    const terms = pickTerms(l.c).map(sem.name);
+    return {...l, terms, label: terms.slice(0, 3).join(" · ") || "(키워드 없음)", sim: dot(l.c, sv)};
+  }).sort((a, b) => b.sim - a.sim || b.m.length - a.m.length);   // 내 논문과 가까운 주제가 위로
+  const idx = new Map(), names = [], terms = [];
+  lanes.forEach((l, i) => { names.push(l.label); terms.push(l.terms); l.m.forEach(id => idx.set(id, i)); });
+  if (other.length) { names.push("기타 (키워드 부족)"); terms.push([]); other.forEach(id => idx.set(id, names.length - 1)); }
+  return {names, idx, terms, other: other.length ? names.length - 1 : -1, mode: "sem", nOther: other.length};
+}
+
+function groupTopic(papers, ids, laneMax) {       // 기존 방식: OpenAlex 분류명이 같은 논문끼리
+  const cnt = new Map(); ids.forEach(n => cnt.set(papers.get(n).topic, (cnt.get(papers.get(n).topic) || 0) + 1));
+  const lanes = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, laneMax).map(x => x[0]);
+  const idx = new Map(); let other = 0;
+  ids.forEach(n => { const i = lanes.indexOf(papers.get(n).topic); if (i < 0) other++; idx.set(n, i < 0 ? lanes.length : i); });
+  return {names: lanes.concat(other ? ["기타"] : []), idx, terms: lanes.map(() => []).concat(other ? [[]] : []), other: other ? lanes.length : -1, mode: "topic", total: cnt.size, nOther: other};
+}
+
+function termOrigins(papers, res, seedId, sem, n = 8) {     // 내 논문의 핵심 키워드를 조상 중 가장 먼저 쓴 논문
+  const sv = sem.vecs.get(seedId), sd = sem.docs.get(seedId); if (!sv) return [];
+  const rows = [];
+  for (const [k] of [...sv].sort((a, b) => b[1] - a[1])) {
+    if (!(sd.get(k) || {}).txt) continue;
+    const users = [...res.anc].filter(a => ((sem.docs.get(a) || new Map()).get(k) || {}).txt && sem.vecs.get(a).has(k))
+      .sort((a, b) => papers.get(a).year - papers.get(b).year || papers.get(b).cites - papers.get(a).cites);
+    if (!users.length) continue;
+    const dec = new Map(); users.forEach(a => { const d = Math.floor(papers.get(a).year / 10) * 10; dec.set(d, (dec.get(d) || 0) + 1); });
+    rows.push({name: sem.name(k), first: users[0], n: users.length, peak: [...dec].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0]});
+    if (rows.length >= n) break;
+  }
+  return rows;
+}
+
+/* ───────── 분석 ───────── */
+function pctRank(vals) {                       // Map → 0~1 백분위 (동률은 평균 순위)
+  const items = [...vals].sort((a, b) => a[1] - b[1]), n = items.length, out = new Map();
+  if (n <= 1) { items.forEach(([k]) => out.set(k, 1)); return out; }
+  for (let i = 0; i < n;) {
+    let j = i; while (j + 1 < n && items[j + 1][1] === items[i][1]) j++;
+    for (let k = i; k <= j; k++) out.set(items[k][0], (i + j) / 2 / (n - 1));
+    i = j + 1;
+  }
+  return out;
+}
+
+function analyze(papers, rawEdges, seedId, sem) {
+  // 연도·ID 순서를 매겨, 인용된 논문이 항상 더 앞선 순서가 되도록 간선을 정리 → 순환 없는 그래프
+  const order = [...papers.values()].filter(p => p.year).sort((a, b) => a.year - b.year || (a.id < b.id ? -1 : 1));
+  const idx = new Map(order.map((p, i) => [p.id, i]));
+  const succ = new Map(order.map(p => [p.id, []])), pred = new Map(order.map(p => [p.id, []]));
+  const edges = [];
+  for (const [u, v] of rawEdges) {
+    if (u !== v && idx.has(u) && idx.has(v) && idx.get(v) < idx.get(u)) { succ.get(u).push(v); pred.get(v).push(u); edges.push([u, v]); }
+  }
+  const anc = new Set(), stack = [seedId];
+  while (stack.length) for (const v of succ.get(stack.pop()) || []) if (!anc.has(v)) { anc.add(v); stack.push(v); }
+  const inSub = new Set([...anc, seedId]);
+  const topo = [...inSub].sort((a, b) => idx.get(b) - idx.get(a));            // 인용하는 쪽 → 인용되는 쪽
+  const subEdges = edges.filter(([u, v]) => inSub.has(u) && inSub.has(v));
+
+  const paths = new Map([[seedId, 1]]);
+  for (const u of topo) for (const v of succ.get(u)) if (inSub.has(v)) paths.set(v, (paths.get(v) || 0) + (paths.get(u) || 0));
+  const indeg = new Map([...inSub].map(n => [n, 0]));
+  subEdges.forEach(([, v]) => indeg.set(v, indeg.get(v) + 1));
+
+  const sv = sem.vecs.get(seedId) || new Map();     // 시작 논문의 의미 키워드 벡터
+  const years = [...anc].map(a => papers.get(a).year), ymin = Math.min(...years), ymax = Math.max(...years);
+  const raw = {paths: new Map(), indeg: new Map(), cites: new Map(), early: new Map(), topic: new Map()};
+  for (const a of anc) {
+    const p = papers.get(a);
+    raw.paths.set(a, Math.log1p(paths.get(a) || 0)); raw.indeg.set(a, indeg.get(a));
+    raw.cites.set(a, Math.log1p(p.cites)); raw.early.set(a, (ymax - p.year) / Math.max(1, ymax - ymin));
+    raw.topic.set(a, dot(sem.vecs.get(a) || new Map(), sv));      // 의미 키워드 유사도(코사인)
+  }
+  const ranks = Object.fromEntries(Object.keys(WEIGHTS).map(k => [k, pctRank(raw[k])]));
+  const score = new Map([...anc].map(a => [a, Object.keys(WEIGHTS).reduce((s, k) => s + WEIGHTS[k] * ranks[k].get(a), 0)]));
+  const ranking = [...anc].sort((a, b) => score.get(b) - score.get(a));
+
+  let lineage = [];                              // 시작 논문 → 1위 후보까지, 경로상 로그 인용수 합이 최대인 사슬
+  if (ranking.length) {
+    const target = ranking[0], best = new Map([[seedId, 0]]), prev = new Map();
+    for (const u of topo) {
+      if (!best.has(u)) continue;
+      for (const v of succ.get(u)) if (inSub.has(v)) {
+        const w = best.get(u) + Math.log1p(papers.get(v).cites);
+        if (w > (best.has(v) ? best.get(v) : -1)) { best.set(v, w); prev.set(v, u); }
+      }
+    }
+    if (best.has(target)) { for (let n = target; n !== seedId; n = prev.get(n)) lineage.push(n); lineage.push(seedId); lineage.reverse(); }
+  }
+  return {anc, edges: subEdges, paths, indeg, score, ranking, lineage};
+}
+
+/* ───────── 리포트 ───────── */
+const label = p => { const a = p.authors.slice(0, 2).join(", ") + (p.authors.length > 2 ? " 외" : ""); return `${a} (${p.year ?? "?"}) ${p.title}`; };
+const link = p => p.doi ? "https://doi.org/" + p.doi : "https://openalex.org/" + p.id;
+const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return (h % 1000) / 1000; };
+const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#b6992d", "#d37295", "#9d7660", "#79706e",
+                 "#a0cbe8", "#ffbe7d", "#8cd17d", "#ff9d9a", "#d4a6c8", "#86bcb6", "#f1ce63", "#fabfd2", "#d7b5a6", "#bab0ac"];
+let laneN = 20;                                  // 지도에 표시할 주제 수 (5~20)
+
+function renderMap(papers, res, seedId, g, sem) {
+  const ids = [...res.anc, seedId].filter(n => papers.get(n).year);
+  const ys = ids.map(n => papers.get(n).year), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const names = g.names, laneOf = n => g.idx.get(n);
+  const LH0 = names.length <= 10 ? 74 : Math.max(46, 74 - (names.length - 10) * 3);   // 주제가 많으면 칸 높이를 줄임
+  const W = 1180, LH = LH0, ML = 240, MT = 36, H = MT + LH * names.length + 30;
+  const px = y => ML + 18 + (y - y0) / Math.max(1, y1 - y0) * (W - ML - 60);
+  const pos = new Map(ids.map(n => [n, [px(papers.get(n).year), MT + laneOf(n) * LH + LH / 2 + (hash(n) - .5) * (LH - 26)]]));
+  const top5 = new Set(res.ranking.slice(0, 5)), lin = new Set(res.lineage);
+  const maxc = Math.max(1, ...ids.map(n => papers.get(n).cites));
+  const step = y1 - y0 > 30 ? 5 : 2;
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="연도와 주제별 인용 계보 지도">`;
+  for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step)
+    s += `<line x1="${px(y).toFixed(0)}" y1="${MT - 8}" x2="${px(y).toFixed(0)}" y2="${H - 24}" class="grid"/><text x="${px(y).toFixed(0)}" y="${H - 8}" class="ax" text-anchor="middle">${y}</text>`;
+  names.forEach((nm, i) => { const yy = MT + i * LH;
+    s += `<rect x="${ML}" y="${yy}" width="${W - ML - 30}" height="${LH}" class="lane${i % 2}"/><text x="${ML - 8}" y="${yy + LH / 2 + 4}" class="ax" text-anchor="end">${esc(nm.length > 36 ? nm.slice(0, 35) + "…" : nm)}<title>${esc(nm)}</title></text>`; });
+  for (const [u, v] of res.edges) if (pos.has(u) && pos.has(v)) {
+    const on = lin.has(u) && lin.has(v);
+    s += `<line x1="${pos.get(u)[0].toFixed(1)}" y1="${pos.get(u)[1].toFixed(1)}" x2="${pos.get(v)[0].toFixed(1)}" y2="${pos.get(v)[1].toFixed(1)}" class="${on ? "edge main" : "edge"}"/>`;
+  }
+  for (const n of [...ids].sort((a, b) => papers.get(a).cites - papers.get(b).cites)) {
+    const p = papers.get(n), [x, y] = pos.get(n), r = 3 + 9 * Math.sqrt(p.cites / maxc);
+    const cls = n === seedId ? "node seed" : top5.has(n) ? "node founder" : "node";
+    const tip = esc(label(p) + "\n주제: " + names[laneOf(n)] + "\n키워드: " + paperKeywords(sem, n, 4).join(", ") + "\n인용 " + p.cites.toLocaleString() + (res.score.has(n) ? " · 시조점수 " + res.score.get(n).toFixed(2) : ""));
+    s += `<a href="${esc(link(p))}" target="_blank" rel="noopener"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${laneOf(n) === g.other ? "#9a9a94" : PALETTE[laneOf(n) % PALETTE.length]}" class="${cls}"><title>${tip}</title></circle></a>`;
+  }
+  return s + "</svg>";
+}
+
+let last = null, grpMode = "sem";                // 주제 묶는 방식: sem(의미 키워드) | topic(OpenAlex 분류명)
+function themeTable(papers, g, ids) {
+  const rows = g.names.map((nm, i) => {
+    const m = ids.filter(n => g.idx.get(n) === i); if (!m.length) return "";
+    const f = m.reduce((b, n) => (papers.get(n).year < papers.get(b).year ? n : b), m[0]), p = papers.get(f);
+    return `<tr><td><span class="dot" style="background:${i === g.other ? "#9a9a94" : PALETTE[i % PALETTE.length]}"></span>${esc(nm)}</td><td>${m.length}</td><td>${p.year}</td><td>${esc(p.title.slice(0, 80))}</td><td class="sub">${esc(g.terms[i].join(", "))}</td></tr>`;
+  }).join("");
+  return `<table><tr><th>주제</th><th>편수</th><th>최초 연도</th><th>최초 논문</th><th>대표 키워드</th></tr>${rows}</table>`;
+}
+function render(seed, alts, papers, res, topN, o, sem) {
+  const anc = res.anc;
+  if (!anc.size) {
+    $("out").innerHTML = `<div class="card"><b>${esc(label(seed))}</b><p class="note">이 논문의 참고문헌 정보를 찾지 못해 계보를 만들 수 없습니다. (OpenAlex와 Semantic Scholar 모두 비어 있음) 다른 판본의 DOI나 ID로 시도해 보세요.</p></div>`;
+    return;
+  }
+  const yrs = [...anc].map(a => papers.get(a).year);
+  const top = res.ranking.slice(0, topN);
+  const rows = top.map((a, i) => { const p = papers.get(a);
+    return `<tr><td>${i + 1}</td><td>${res.score.get(a).toFixed(2)}</td><td>${p.year}</td><td><a href="${esc(link(p))}" target="_blank" rel="noopener">${esc(p.title)}</a><div class="sub">${esc(p.authors.join(", "))}${p.venue ? " · " + esc(p.venue) : ""}</div></td><td>${esc(paperKeywords(sem, a, 3).join(", ") || p.topic)}<div class="sub">${esc(p.topic)}</div></td><td>${p.cites.toLocaleString()}</td><td>${res.indeg.get(a)}</td><td>${Math.round(res.paths.get(a)).toLocaleString()}</td></tr>`; }).join("");
+  const lin = [...res.lineage].reverse().map(n => { const p = papers.get(n);
+    return `<li><b>${p.year}</b> · <a href="${esc(link(p))}" target="_blank" rel="noopener">${esc(p.title)}</a><span class="sub"> — ${esc(p.authors.join(", "))}</span></li>`; }).join("");
+  const dec = new Map();
+  anc.forEach(a => { const d = Math.floor(papers.get(a).year / 10) * 10; (dec.get(d) || dec.set(d, []).get(d)).push(a); });
+  const mx = Math.max(...[...dec.values()].map(v => v.length));
+  const tl = [...dec].sort((a, b) => a[0] - b[0]).map(([d, l]) => {
+    l.sort((a, b) => res.score.get(b) - res.score.get(a));
+    return `<div class="dec"><div class="dh"><b>${d}년대</b> <span class="sub">${l.length}편</span><span class="dbar" style="width:${Math.round(160 * l.length / mx)}px"></span></div><ul>` +
+      l.slice(0, 4).map(a => `<li>${papers.get(a).year} · ${esc(papers.get(a).title.slice(0, 90))}</li>`).join("") + `</ul></div>`; }).join("");
+  const orows = termOrigins(papers, res, seed.id, sem).map(r => { const p = papers.get(r.first);
+    return `<tr><td><b>${esc(r.name)}</b></td><td>${p.year} · <a href="${esc(link(p))}" target="_blank" rel="noopener">${esc(p.title)}</a><div class="sub">${esc(p.authors.join(", "))}</div></td><td>${r.n}편</td><td>${r.peak}년대</td></tr>`; }).join("");
+  const altHtml = alts.length ? `<div class="alt"><span class="sub">다른 논문을 찾으셨다면:</span>${alts.map(a => `<button type="button" class="chip" data-id="${esc(a.id)}" title="${esc(label(a))}">${esc((a.year ?? "?") + " " + a.title.slice(0, 40))}…</button>`).join("")}</div>` : "";
+
+  $("out").innerHTML = `
+  <h2>시작 논문</h2>
+  <div class="card"><b>${esc(label(seed))}</b>
+    <div class="sub">조상 논문 ${anc.size}편 · 인용 관계 ${res.edges.length}개 · ${Math.min(...yrs)}–${seed.year} · 참고문헌 ${seed.refs.length}개</div>${altHtml}
+    <div class="actions"><button type="button" id="csv">순위표 CSV 저장</button><button type="button" id="json">네트워크 JSON 저장</button><button type="button" id="print" class="primary">PDF로 저장</button><p class="sub pdfhint">누르면 열리는 인쇄 창에서 "대상/프린터"를 <b>PDF로 저장</b>으로 고르세요. 입력창·버튼은 빠지고 보고서만 A4로 저장됩니다.</p></div>
+    <div class="printonly sub">생성일 ${new Date().toLocaleDateString("ko-KR")} · 추적 범위: ${o.depth}단계, 논문당 참고문헌 ${o.topRefs}편 확장, 수집 상한 ${o.maxPapers}편${o.field ? ", 분야 제한 " + esc(o.field) : ""} · 데이터: OpenAlex${o.useS2 ? ", Semantic Scholar" : ""}</div></div>
+  <h2>① 시조 후보 상위 ${top.length}편</h2>
+  <div class="card"><table><tr><th>#</th><th>점수</th><th>연도</th><th>논문</th><th>의미 키워드</th><th>총 인용</th><th>조상 내 피인용</th><th>경로 수</th></tr>${rows}</table>
+    <p class="sub">점수 = 경로 수 ${WEIGHTS.paths * 100}% + 조상 내 피인용 ${WEIGHTS.indeg * 100}% + 전체 인용수 ${WEIGHTS.cites * 100}% + 오래됨 ${WEIGHTS.early * 100}% + 의미 키워드 유사도 ${WEIGHTS.topic * 100}% (각 항목은 순위 백분위). 휴리스틱이므로 후보를 직접 읽어 확인하세요.</p></div>
+  <h2>② 연도 × 주제 지도</h2>
+  <div class="card">
+    <div class="maptools scr">
+      <label>주제 묶는 방식 <select id="grp"><option value="sem"${grpMode === "sem" ? " selected" : ""}>의미 키워드 기반</option><option value="topic"${grpMode === "topic" ? " selected" : ""}>OpenAlex 분류명 기반</option></select></label>
+      <label>주제 수 <output id="laneV">${laneN}</output>개 <input type="range" id="laneN" min="5" max="20" step="1" value="${laneN}" aria-label="지도에 표시할 주제 수"></label>
+      <span class="sub" id="laneInfo"></span></div>
+    <div class="mapwrap" id="mapbox"></div>
+    <div class="legend">가로=출판연도, 세로=주제, 원 크기=총 인용수, 빨간 테두리=시조 후보 상위 5편, 굵은 테두리=시작 논문, 붉은 선=주 계보. <span id="grpNote"></span><span class="scr"> 원에 마우스를 올리면 제목·키워드, 클릭하면 논문 페이지가 열립니다.</span></div></div>
+  <h2>③ 내 논문의 핵심 키워드는 어디서 시작됐나</h2>
+  <div class="card">${orows ? `<table><tr><th>핵심 키워드</th><th>조상 중 가장 먼저 쓴 논문</th><th>쓴 조상 논문</th><th>가장 활발한 시기</th></tr>${orows}</table>
+    <p class="sub">시작 논문의 제목·키워드에서 가중치가 높은 의미 단어를 뽑아, 조상 논문 중 그 단어를 가장 먼저 쓴 논문을 찾았습니다. 어근이 같은 단어(예: war/wars)는 하나로 합쳤습니다. 단어가 처음 등장한 논문이 개념의 원조라는 보장은 없으니, 해당 논문을 직접 읽어 확인하세요.</p>` : `<p class="note">시작 논문과 겹치는 의미 키워드를 조상 논문에서 찾지 못했습니다. 추적 단계나 수집 상한을 늘려 보세요.</p>`}</div>
+  <h2>④ 시작 논문 → 시조 후보 1위 주 계보</h2>
+  <div class="card"><ol class="lin">${lin || "<li>경로를 찾지 못했습니다.</li>"}</ol></div>
+  <h2>⑤ 연대별 시계열</h2><div class="card">${tl}</div>
+  <h2>⑥ 주제별 정리 (주제별 가장 오래된 논문)</h2>
+  <div class="card" id="themebox"></div>`;
+  last = {seed, papers, res, sem};
+  const ids = [...anc, seed.id].filter(n => papers.get(n).year);
+  const draw = () => {                           // 추적을 다시 하지 않고 지도·주제표만 즉시 다시 그림
+    const g = grpMode === "sem" ? groupSemantic(papers, sem, ids, laneN, seed.id) : groupTopic(papers, ids, laneN);
+    $("mapbox").innerHTML = renderMap(papers, res, seed.id, g, sem);
+    $("themebox").innerHTML = themeTable(papers, g, ids);
+    const k = g.names.length - (g.other >= 0 ? 1 : 0);
+    $("laneInfo").textContent = g.mode === "sem"
+      ? `논문 ${ids.length}편에서 뽑은 의미 키워드가 비슷한 논문끼리 ${k}개 주제로 묶었습니다. 주제 이름은 그 묶음의 대표 단어입니다.`
+      : `전체 ${g.total}개 분류명 중 상위 ${k}개를 따로 표시하고, 나머지는 '기타'로 묶습니다.`;
+    $("grpNote").textContent = g.mode === "sem"
+      ? `주제 묶음: 의미 키워드 기반 (${k}개 묶음${g.nOther ? `, 키워드 부족 ${g.nOther}편은 기타` : ""}).`
+      : `주제 묶음: OpenAlex 분류명 기반 (${k}개).`;
+  };
+  $("laneN").oninput = e => { laneN = +e.target.value; $("laneV").textContent = laneN; draw(); };
+  $("grp").onchange = e => { grpMode = e.target.value; draw(); };
+  draw();
+  $("csv").onclick = exportCSV; $("json").onclick = exportJSON; $("print").onclick = savePDF;
+  $("out").querySelectorAll("button[data-id]").forEach(b => b.onclick = () => { $("q").value = b.dataset.id; $("f").requestSubmit(); });
+}
+
+function download(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+/* PDF 저장: 브라우저 인쇄 기능 사용. 문서 제목이 PDF 기본 파일명이 되므로 잠시 바꿔 둔다. */
+const baseTitle = document.title;
+function savePDF() {
+  if (!last) return;
+  const d = new Date(), p2 = n => String(n).padStart(2, "0");
+  document.title = `시조추적_${last.seed.id}_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}`;
+  window.print();
+}
+window.addEventListener("afterprint", () => { document.title = baseTitle; });
+function exportCSV() {
+  const {seed, papers, res, sem} = last, q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const rows = [["순위", "시조점수", "연도", "제목", "저자", "의미 키워드", "OpenAlex 주제", "인용수", "조상내 피인용", "경로수", "DOI", "OpenAlex"]];
+  res.ranking.forEach((a, i) => { const p = papers.get(a); rows.push([i + 1, res.score.get(a).toFixed(3), p.year, p.title, p.authors.join("; "), paperKeywords(sem, a, 6).join("; "), p.topic, p.cites, res.indeg.get(a), Math.round(res.paths.get(a)), p.doi || "", a]); });
+  download(seed.id + "_ancestors.csv", "﻿" + rows.map(r => r.map(q).join(",")).join("\n"), "text/csv");
+}
+function exportJSON() {
+  const {seed, papers, res} = last;
+  download(seed.id + "_graph.json", JSON.stringify({seed: seed.id, papers: [...res.anc, seed.id].map(n => papers.get(n)), edges: res.edges, scores: Object.fromEntries(res.score)}, null, 1), "application/json");
+}
+
+/* ───────── UI ───────── */
+let ctrl = null;
+function log(t) { const li = document.createElement("li"); li.textContent = t; $("log").appendChild(li); $("log").scrollTop = 1e9; }
+const stats = {req: 0, papers: 0};
+let t0 = 0, timer = null;
+function fmt(s) { return s >= 60 ? Math.floor(s / 60) + "분 " + (s % 60) + "초" : s + "초"; }
+function tick() {
+  if (!t0) return;
+  $("stats").textContent = `경과 ${fmt(Math.floor((Date.now() - t0) / 1000))} · 서버 요청 ${stats.req}회 · 수집한 논문 ${stats.papers}편`;
+}
+function progress(msg, frac) {
+  $("msg").textContent = msg; $("pb").style.width = Math.max(3, Math.round(frac * 100)) + "%";
+  if (timer) document.title = `(${Math.round(frac * 100)}%) 추적 중… · 논문 시조 추적기`;
+}
+function startRun() {
+  stats.req = 0; stats.papers = 0; t0 = Date.now();
+  $("spin").classList.remove("off"); $("bar").classList.add("run");
+  $("go").textContent = "추적 중…";
+  timer = setInterval(tick, 250); tick();
+  $("status").scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+function endRun() {
+  tick(); clearInterval(timer); timer = null; t0 = 0;
+  $("spin").classList.add("off"); $("bar").classList.remove("run");
+  $("go").textContent = "시조 추적"; document.title = "논문 시조 추적기";
+}
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const query = $("q").value.trim(); if (!query) return;
+  const o = {
+    depth: Math.min(8, Math.max(1, +$("depth").value || 6)), topRefs: Math.min(50, Math.max(3, +$("topRefs").value || 50)),
+    maxPapers: Math.min(1500, Math.max(30, +$("maxPapers").value || 500)), field: $("field").value.trim(), useS2: $("useS2").checked
+  };
+  ctrl = new AbortController();
+  $("go").disabled = true; $("stop").disabled = false; $("status").hidden = false; $("log").innerHTML = ""; $("out").innerHTML = ""; startRun();
+  try {
+    progress("시작 논문을 찾는 중…", 0.02);
+    const {seed, alts} = await resolve(query, ctrl.signal);
+    if (!seed) throw new Error("논문을 찾지 못했습니다. DOI나 OpenAlex ID(W로 시작)로 다시 시도하거나, 제목을 영문 원제로 입력해 보세요.");
+    log("시작 논문: " + label(seed) + `  (참고문헌 ${seed.refs.length}개)`);
+    const {papers, edges} = await buildAncestry(seed, o, ctrl.signal, progress);
+    progress("의미 키워드를 추출하고 시조 후보를 분석하는 중…", 0.95);
+    await sleep(0);
+    const sem = buildSemantic(papers);
+    const res = analyze(papers, edges, seed.id, sem);
+    render(seed, alts, papers, res, 15, o, sem);
+    progress(`완료 — 논문 ${papers.size}편 수집, 조상 ${res.anc.size}편 분석`, 1);
+    $("out").scrollIntoView({behavior: "smooth"});
+  } catch (err) {
+    if (err.name === "AbortError") progress("중단했습니다.", 0);
+    else { $("msg").innerHTML = `<span class="err">${esc(err.message)}</span>`; $("pb").style.width = "0"; }
+  } finally { endRun(); $("go").disabled = false; $("stop").disabled = true; ctrl = null; }
+});
+["depth", "topRefs", "maxPapers"].forEach(id => {
+  const sync = () => { $(id + "V").textContent = $(id).value; };
+  $(id).addEventListener("input", sync); sync();
+});
+$("stop").onclick = () => ctrl && ctrl.abort();
+document.querySelectorAll("button[data-ex]").forEach(b => b.onclick = () => { $("q").value = b.dataset.ex; $("q").focus(); });
+$("theme").onclick = () => {
+  const r = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = r.dataset.theme || (dark ? "dark" : "light"); r.dataset.theme = cur === "dark" ? "light" : "dark";
+};
+</script>
+</body>
+</html>
